@@ -40,6 +40,7 @@ if solver_type == options[disabled_index]:
     st.stop()  # Stop further execution if 'Numerical' is selected
 
 enable_thiele = st.sidebar.checkbox('Use presets', value=False)
+show_tables = st.sidebar.checkbox('Show Tables', value=False)  # Checkbox to enable/disable tables
 
 D_current = 0.5
 d_current = 0.5
@@ -145,31 +146,31 @@ def format_value(x):
         return f'{float(x):.6e}'  # Format as scientific notation
     except ValueError:
         return x  # Return non-numeric values as is
+if show_tables:
+    # Create formatted DataFrame for display
+    output_df_display = output_df.applymap(format_value)
+    output_conc_display = output_conc.applymap(format_value)
 
-# Create formatted DataFrame for display
-output_df_display = output_df.applymap(format_value)
-output_conc_display = output_conc.applymap(format_value)
+    # Display the tables
+    st.write("### Simulation Results")
+    st.dataframe(output_df_display)
+    st.write("### Concentration Profile")
+    st.dataframe(output_conc_display)
 
-# Display the tables
-st.write("### Simulation Results")
-st.dataframe(output_df_display)
-st.write("### Concentration Profile")
-st.dataframe(output_conc_display)
+    # Add download button for saving the table
+    csv = output_df.to_csv(index=False)
+    st.download_button(
+        label="Download Simulation Results CSV",
+        data=csv,
+        file_name="simulation_results.csv",
+        mime="text/csv"
+    )
 
-# Add download button for saving the table
-csv = output_df.to_csv(index=False)
-st.download_button(
-    label="Download Simulation Results CSV",
-    data=csv,
-    file_name="simulation_results.csv",
-    mime="text/csv"
-)
-
-# Add download button for saving the concentration data
-con = output_conc.to_csv(index=False)
-st.download_button(
-    label="Download Conc. CSV",
-    data=con,
-    file_name="Conc_results.csv",
-    mime="text/csv"
-)
+    # Add download button for saving the concentration data
+    con = output_conc.to_csv(index=False)
+    st.download_button(
+        label="Download Conc. CSV",
+        data=con,
+        file_name="Conc_results.csv",
+        mime="text/csv"
+    )

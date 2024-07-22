@@ -2,7 +2,6 @@ import numpy as np
 import math
 
 pi = math.pi
-eps = 0.1  # Default value for epsilon; adjust as needed
 
 def A(r, j):
     if j == 0:
@@ -42,9 +41,9 @@ def linspace(start, stop, num):
     return np.linspace(start, stop, num)
 
 def calculate_C0(C1, C2, kd, t):
-    return C1 * np.exp(-kd * t) + C2
+    return C1 * np.exp(-kd * t)
 
-def beta(t, C0, kp, kd, Dae, alpha):
+def beta(t, C0, kp, kd, Dae, alpha, eps):
     return (kp * C0 * np.exp(-kd * t)) / Dae * (1 - eps) / (alpha ** 3)
 
 def calculate_Vcati(Vcat_init, vtot, r):
@@ -58,7 +57,7 @@ def SS_run(D, kp, Cas, d, t, C1, kd, dencat, denpol, eps):
     C2 = 0
 
     Cas = Cas
-    iter = 20
+    iter = 50
     Dae = D
     rcat = d / 2
     Vcat_init = 4.0 / 3.0 * pi * rcat ** 3
@@ -76,12 +75,13 @@ def SS_run(D, kp, Cas, d, t, C1, kd, dencat, denpol, eps):
     thiele_data = []
     polymer_mass = []
     AC_Conc = []
-
+    acc_mass = []
+    acmass = 0
     for t in t_values:
         delta_r = (R - rls) / (iter - 1.0)
         alpha = R / rcat
         C0 = calculate_C0(C1, C2, kd, t)
-        b = beta(t, C0, kp, kd, Dae, alpha)
+        b = beta(t, C0, kp, kd, Dae, alpha, eps)
         b_sqrt = np.sqrt(b)
 
         Ca_values = []
@@ -93,19 +93,20 @@ def SS_run(D, kp, Cas, d, t, C1, kd, dencat, denpol, eps):
 
         if vpol == 0:
             vpol += 1e-9
-
+        
         pmass = Vcat_init / vpol * kp * C0 * np.exp(-kd * t) * 28 * ddt * 4 * pi * (Cas * R / (np.sinh(R * b_sqrt)) * (R * b_sqrt * np.cosh(R * b_sqrt) - np.sinh(R * b_sqrt)) / (b))
+        acmass += pmass
         Rins_pol = pmass / Vcat_init / dencat / (ddt+0.00000001) * 3600.0 / 1000.0
 
         vpol_tot = pmass / denpol / 1000
         vpol += vpol_tot
         vtot += vpol_tot / (1 - eps)
+        thiele = R / 3.0 * b_sqrt
         R = (3.0 / 4.0 / pi * vpol) ** (1.0 / 3.0)
 
         Ca.append((t, Ca_values))
         eff = (R * b_sqrt * np.cosh(R * b_sqrt) - np.sinh(R * b_sqrt)) / (b)
         eff = 4 * pi * R * eff / (np.sinh(R * b_sqrt)) / vpol
-        thiele = R / 3.0 * b_sqrt
 
         ddt = ddtc
         R_data.append(R)
@@ -113,7 +114,7 @@ def SS_run(D, kp, Cas, d, t, C1, kd, dencat, denpol, eps):
         ef.append(eff)
         AC_Conc.append(C0 * np.exp(-kd * t) / (alpha ** 3))
         thiele_data.append(thiele)
-        polymer_mass.append(pmass)
+        polymer_mass.append(acmass)
 
     return t_values, R_pol, ef, R_data, thiele_data, polymer_mass, AC_Conc, Ca
 
@@ -266,11 +267,10 @@ def FS_run(D, kp, Surf_Conc, d, set_time, Y0 ,kd, dencat, denpol, eps):
             Avg_Conc_Profile.append(Shell_Conc.copy())
             Conc_Profile.append(Conc.copy())
             rate_Profile.append(rate_pol.copy())
-            AC_Profile.appendt
-            d(Y.copy())
-            mass_Profile.append(inst_mass.copy())
+            AC_Profile.append(Y.copy())
+            mass_Profile.append(total_mass.copy())
             dt_frame.append(dt)
             save = 0
             print(f"time : {time} dt: {smallest_dt}")
 
-    return (R_data, R_pol, ef, AC_Conc, Conc_Profile, Avg_Conc_Profile, rate_Profile, mass_Profile, dt_frame)
+    return (R_data, R_pol, ef, AC_Conc, Conc_Profile, Avg_Conc_Profile, rate_Profile, mass_Profile, save_time)

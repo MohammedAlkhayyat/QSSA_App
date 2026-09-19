@@ -148,8 +148,8 @@ def format_value(x):
         return x  # Return non-numeric values as is
 if show_tables:
     # Create formatted DataFrame for display
-    output_df_display = output_df.applymap(format_value)
-    output_conc_display = output_conc.applymap(format_value)
+    output_df_display = output_df.map(format_value)
+    output_conc_display = output_conc.map(format_value)
 
     # Display the tables
     st.write("### Simulation Results")

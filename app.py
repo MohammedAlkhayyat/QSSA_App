@@ -6,6 +6,9 @@ from calculations import SS_run, FS_run
 from plotting import plot_results
 import math
 
+# ON/OFF: save runs and overlay them on the six result plots.
+ENABLE_COMPARE_PLOTS = True
+
 # Streamlit layout
 st.set_page_config(layout="wide")
 st.sidebar.title("Polymer Flow Model Simulation")
@@ -102,14 +105,40 @@ else:
         del st.session_state.y_limits
 
 # Extract the concentration data for the selected time
+time_idx = max(0, min(int(time_idx), len(t_values) - 1))
 selected_time = t_values[time_idx]
 selected_Ca = Ca[time_idx][1]
 selected_R = R_data[time_idx]
 radial_positions = np.linspace(1e-9 / selected_R, selected_R / selected_R, len(selected_Ca))  # Radial positions from rls to R
 
+compare_runs = None
+if ENABLE_COMPARE_PLOTS:
+    if "compare_runs" not in st.session_state:
+        st.session_state.compare_runs = []
+    st.markdown("### Compare plots")
+    c1, c2 = st.columns([3, 1])
+    run_label = c1.text_input("Run label", value=f"Run {len(st.session_state.compare_runs) + 1}")
+    if c1.button("Save current run for comparison"):
+        st.session_state.compare_runs.append({
+            "label": run_label,
+            "t": list(t_values),
+            "R_pol": list(R_pol),
+            "ef": list(ef),
+            "R_data": list(R_data),
+            "thiele_data": list(thiele_data),
+            "polymer_mass": list(polymer_mass),
+            "radial_positions": list(radial_positions),
+            "selected_Ca": list(selected_Ca),
+        })
+    if c2.button("Clear saved runs"):
+        st.session_state.compare_runs = []
+    if st.session_state.compare_runs:
+        st.caption("Saved runs: " + ", ".join(run["label"] for run in st.session_state.compare_runs))
+        compare_runs = st.session_state.compare_runs
+
 # Plot results
 plot_results(
-    t_values, R_pol, ef, R_data, thiele_data, polymer_mass, selected_Ca, radial_positions, AC_Conc, Cas, axis_locked=lock_axes
+    t_values, R_pol, ef, R_data, thiele_data, polymer_mass, selected_Ca, radial_positions, AC_Conc, Cas, axis_locked=lock_axes, compare_runs=compare_runs
 )
 
 # Convert tuples to a DataFrame-friendly format

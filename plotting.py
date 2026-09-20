@@ -1,7 +1,7 @@
 import matplotlib.pyplot as plt
 import streamlit as st
 
-def plot_results(t_values, R_pol, ef, R_data, thiele_data, polymer_mass, selected_Ca, radial_positions, AC_Conc, Cas, axis_locked=False):
+def plot_results(t_values, R_pol, ef, R_data, thiele_data, polymer_mass, selected_Ca, radial_positions, AC_Conc, Cas, axis_locked=False, selected_Ca2=None, Cas2=None):
     fig, axs = plt.subplots(2, 3, figsize=(15, 10))
 
     # Plot Polymerization Rate
@@ -35,11 +35,17 @@ def plot_results(t_values, R_pol, ef, R_data, thiele_data, polymer_mass, selecte
     axs[1, 1].set_title('Polymerization yield')
 
     # Plot Monomer Concentration
-    axs[1, 2].plot(radial_positions, selected_Ca)
+    axs[1, 2].plot(radial_positions, selected_Ca, label="Monomer 1")
+    if selected_Ca2 is not None:
+        axs[1, 2].plot(radial_positions, selected_Ca2, label="Monomer 2")
+        axs[1, 2].legend(fontsize=8)
     axs[1, 2].set_xlabel('Radial Position (m)')
     axs[1, 2].set_ylabel('Monomer Concentration (mol/m³)')
     axs[1, 2].set_title('Monomer Concentration')
-    axs[1, 2].set_ylim([0, Cas])
+    ylim_hi = Cas
+    if Cas2 is not None:
+        ylim_hi = max(Cas, Cas2)
+    axs[1, 2].set_ylim([0, ylim_hi])
 
     # Set axis limits if locked
     if axis_locked and 'y_limits' in st.session_state:

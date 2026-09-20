@@ -6,6 +6,9 @@ from calculations import SS_run, FS_run
 from plotting import plot_results
 import math
 
+# ON/OFF: second-monomer (multicomponent) QSSA simulation.
+ENABLE_MULTICOMPONENT = True
+
 # Streamlit layout
 st.set_page_config(layout="wide")
 st.sidebar.title("Polymer Flow Model Simulation")
@@ -59,6 +62,15 @@ with st.sidebar:
     t = st.slider('Simulation Time (s)', min_value=10, max_value=100000, value=15000, help="Total simulation time in seconds.")
     C1 = st.slider('Active Sites Concentration (mol/m³)', min_value=0.1, max_value=10.0, value=5.0, help="Concentration of active sites in the polymer.")
     time_idx = st.slider('Select Time Index', min_value=0, max_value=t, value=10, help="Index for selecting a specific time point for concentration profile.")
+    enable_second = False
+    D2 = kp2 = Cas2 = MW2 = None
+    if ENABLE_MULTICOMPONENT:
+        enable_second = st.checkbox('Multicomponent (second monomer)', value=False, help="Add a second monomer with its own diffusivity, kp, and surface concentration.")
+        if enable_second:
+            D2 = st.slider('Monomer 2 Diffusivity (m²/s) × 10⁻¹⁰', min_value=D_current, max_value=50 * D_current, value=D_current, help="Diffusivity of the second monomer (multiplied by 10⁻¹⁰ for scale).")
+            kp2 = st.slider('Monomer 2 Propagation Constant (m³·mol/s)', min_value=1.0, max_value=10000.0, value=200.0, help="Rate constant for chain propagation of the second monomer.")
+            Cas2 = st.slider('Monomer 2 Concentration (mol/m³)', min_value=0.0, max_value=1000.0, value=50.0, help="Surface concentration of the second monomer.")
+            MW2 = st.slider('Monomer 2 Molecular Weight (g/mol)', min_value=1.0, max_value=200.0, value=42.08, help="Molecular weight of the second monomer.")
 
     if enable_thiele:
         if thiele_value == f"ϕ = {0.50:.3f}":
@@ -79,12 +91,21 @@ denpol = 2300
 lock_axes = st.checkbox('Lock Y-Axis', value=False, help="Lock the y-axis limits for all plots to the current range to allow comparison across different simulations.")
 
 # Compute data based on selected solver
+selected_Ca2 = None
 if solver_type == "QSSA":
-    t_values, R_pol, ef, R_data, thiele_data, polymer_mass, AC_Conc, Ca = SS_run(
-        D * 1e-8, kp, Cas, d * 1e-6, t, C1, kd * 1e-4, dencat, denpol, eps)
+    if ENABLE_MULTICOMPONENT and enable_second:
+        ss_out = SS_run(
+            D * 1e-8, kp, Cas, d * 1e-6, t, C1, kd * 1e-4, dencat, denpol, eps,
+            D2=D2 * 1e-8, kp2=kp2, Cas2=Cas2, MW2=MW2)
+    else:
+        ss_out = SS_run(
+            D * 1e-8, kp, Cas, d * 1e-6, t, C1, kd * 1e-4, dencat, denpol, eps)
+    t_values, R_pol, ef, R_data, thiele_data, polymer_mass, AC_Conc, Ca = ss_out[:8]
+    Ca2_profiles = ss_out[8] if len(ss_out) > 8 else None
 else:  # FS_run
     R_data, R_pol, ef, AC_Conc, Ca, Avg_Conc_Profile, R_pol, polymer_mass, t_values = FS_run(
         D * 1e-8, kp, Cas, d * 1e-6, t, C1, kd * 1e-4, dencat, denpol, eps)
+    Ca2_profiles = None
 
 # Store axis limits in session state if checkbox is checked
 if lock_axes:
@@ -102,14 +123,17 @@ else:
         del st.session_state.y_limits
 
 # Extract the concentration data for the selected time
+time_idx = max(0, min(int(time_idx), len(t_values) - 1))
 selected_time = t_values[time_idx]
 selected_Ca = Ca[time_idx][1]
 selected_R = R_data[time_idx]
 radial_positions = np.linspace(1e-9 / selected_R, selected_R / selected_R, len(selected_Ca))  # Radial positions from rls to R
+if Ca2_profiles is not None:
+    selected_Ca2 = Ca2_profiles[time_idx][1]
 
 # Plot results
 plot_results(
-    t_values, R_pol, ef, R_data, thiele_data, polymer_mass, selected_Ca, radial_positions, AC_Conc, Cas, axis_locked=lock_axes
+    t_values, R_pol, ef, R_data, thiele_data, polymer_mass, selected_Ca, radial_positions, AC_Conc, Cas, axis_locked=lock_axes, selected_Ca2=selected_Ca2, Cas2=Cas2
 )
 
 # Convert tuples to a DataFrame-friendly format

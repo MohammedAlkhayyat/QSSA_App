@@ -49,12 +49,13 @@ def beta(t, C0, kp, kd, Dae, alpha, eps):
 def calculate_Vcati(Vcat_init, vtot, r):
     return Vcat_init * (4.0 / 3.0 * pi * r ** 3) / vtot
 
-def SS_run(D, kp, Cas, d, t, C1, kd, dencat, denpol, eps):
+def SS_run(D, kp, Cas, d, t, C1, kd, dencat, denpol, eps, D2=None, kp2=None, Cas2=None, MW2=28.05):
     Nt = 15000
     MW = 28.05
     denampol = 903.5 * (1 - eps)
     rls = 1e-9
     C2 = 0
+    enable_second = (D2 is not None) and (kp2 is not None) and (Cas2 is not None)
 
     Cas = Cas
     iter = 50
@@ -70,6 +71,7 @@ def SS_run(D, kp, Cas, d, t, C1, kd, dencat, denpol, eps):
     ddtc = t / (Nt - 1.0)
     ddt = 0
     Ca = []
+    Ca2_profiles = []
     R_data = []
     ef = []
     thiele_data = []
@@ -95,6 +97,17 @@ def SS_run(D, kp, Cas, d, t, C1, kd, dencat, denpol, eps):
             vpol += 1e-9
         
         pmass = Vcat_init / vpol * kp * C0 * np.exp(-kd * t) * 28 * ddt * 4 * pi * (Cas * R / (np.sinh(R * b_sqrt)) * (R * b_sqrt * np.cosh(R * b_sqrt) - np.sinh(R * b_sqrt)) / (b))
+        if enable_second:
+            b2 = beta(t, C0, kp2, kd, D2, alpha, eps)
+            b2_sqrt = np.sqrt(b2)
+            Ca2_values = []
+            for r in np.linspace(rls, R, iter):
+                Ca2_values.append(Cas2 * R / r * np.sinh(r * b2_sqrt) / (np.sinh(R * b2_sqrt)))
+            if len(Ca2_values) != iter:
+                Ca2_values.append(Cas2)
+            pmass2 = Vcat_init / vpol * kp2 * C0 * np.exp(-kd * t) * MW2 * ddt * 4 * pi * (Cas2 * R / (np.sinh(R * b2_sqrt)) * (R * b2_sqrt * np.cosh(R * b2_sqrt) - np.sinh(R * b2_sqrt)) / (b2))
+            pmass = pmass + pmass2
+            Ca2_profiles.append((t, Ca2_values))
         acmass += pmass
         Rins_pol = pmass / Vcat_init / dencat / (ddt+0.00000001) * 3600.0 / 1000.0
 
@@ -116,8 +129,9 @@ def SS_run(D, kp, Cas, d, t, C1, kd, dencat, denpol, eps):
         thiele_data.append(thiele)
         polymer_mass.append(acmass)
 
+    if enable_second:
+        return t_values, R_pol, ef, R_data, thiele_data, polymer_mass, AC_Conc, Ca, Ca2_profiles
     return t_values, R_pol, ef, R_data, thiele_data, polymer_mass, AC_Conc, Ca
-
 
 
 def FS_run(D, kp, Surf_Conc, d, set_time, Y0 ,kd, dencat, denpol, eps):

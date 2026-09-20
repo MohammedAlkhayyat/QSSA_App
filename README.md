@@ -1,8 +1,16 @@
 # QSSA Polymer Flow Model Simulation
 
-Streamlit app for exploring polymer particle growth with a quasi-steady-state approximation (QSSA) solver. Adjust diffusivity, catalyst size, kinetics, and porosity in the sidebar and watch rate, efficiency, radius, Thiele modulus, yield, and the radial monomer profile update.
+Streamlit app for the **polymer flow model (PFM)** — also written **polymeric flow model** — of **single-particle growth** in **heterogeneous olefin polymerization**. This is a **polyolefin** problem: **polyethylene (PE)**, **polypropylene (PP)**, and **ethylene/1-olefin copolymers** made on a **supported solid catalyst** (Ziegler–Natta or metallocene). Polymer accumulates on the catalyst fragment, the particle grows, and **intraparticle mass transfer** can limit the rate. That morphology does not apply to typical homogeneous polymerizations of other resins.
+
+The solver uses the **quasi-steady-state approximation (QSSA)** of the PFM so you can inspect **Thiele modulus**, effectiveness factor, polymerization rate, particle radius, yield, and the radial **monomer concentration** profile. A related single-particle description in the same literature is the **multigrain model (MGM)** / **multi-grain model**; this app implements the PFM/QSSA route, not a full MGM.
+
+Adjust diffusivity, catalyst size, kinetics, and porosity in the sidebar and watch the plots update.
 
 **App version:** 1.0.3
+
+## Keywords
+
+polymer flow model, polymeric flow model, PFM, QSSA, quasi-steady-state approximation, single-particle model, polyolefin, polyethylene, PE, polypropylene, PP, olefin polymerization, olefin homopolymerization, ethylene 1-olefin copolymerization, heterogeneous catalysis, supported catalyst, Ziegler–Natta, metallocene, catalyst particle growth, catalyst fragmentation, intraparticle diffusion, mass-transfer limitation, Thiele modulus, effectiveness factor, multigrain model, multi-grain model, MGM, random-pore polymeric flow model, slurry-phase polyethylene, gas-phase olefin polymerization, polymer reactor engineering
 
 ## Run locally
 

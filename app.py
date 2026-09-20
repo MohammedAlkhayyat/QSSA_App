@@ -2,7 +2,7 @@ import streamlit as st
 import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
-from calculations import SS_run, FS_run
+from calculations import SS_run, FS_run, NT
 from plotting import plot_results
 import math
 
@@ -58,7 +58,7 @@ with st.sidebar:
     eps = st.slider('Porosity', min_value=0.0, max_value=1.0, value=0.5, help="Porosity of the polymer.")
     t = st.slider('Simulation Time (s)', min_value=10, max_value=100000, value=15000, help="Total simulation time in seconds.")
     C1 = st.slider('Active Sites Concentration (mol/m³)', min_value=0.1, max_value=10.0, value=5.0, help="Concentration of active sites in the polymer.")
-    time_idx = st.slider('Select Time Index', min_value=0, max_value=t, value=10, help="Index for selecting a specific time point for concentration profile.")
+    time_idx = st.slider('Select Time Index', min_value=0, max_value=NT - 1, value=10, help="Index into the QSSA time grid (0 to 14999) used for the monomer concentration profile.")
 
     if enable_thiele:
         if thiele_value == f"ϕ = {0.50:.3f}":
@@ -147,9 +147,10 @@ def format_value(x):
     except ValueError:
         return x  # Return non-numeric values as is
 if show_tables:
-    # Create formatted DataFrame for display
-    output_df_display = output_df.applymap(format_value)
-    output_conc_display = output_conc.applymap(format_value)
+    # Create formatted DataFrame for display (pandas 2.x/3.x: map; older: applymap)
+    _fmt = (lambda df: df.map(format_value) if hasattr(df, "map") else df.applymap(format_value))
+    output_df_display = _fmt(output_df)
+    output_conc_display = _fmt(output_conc)
 
     # Display the tables
     st.write("### Simulation Results")

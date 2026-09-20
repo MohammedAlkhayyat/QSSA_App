@@ -49,8 +49,11 @@ def beta(t, C0, kp, kd, Dae, alpha, eps):
 def calculate_Vcati(Vcat_init, vtot, r):
     return Vcat_init * (4.0 / 3.0 * pi * r ** 3) / vtot
 
+NT = 15000  # number of QSSA time samples (also used by the Streamlit time-index slider)
+
+
 def SS_run(D, kp, Cas, d, t, C1, kd, dencat, denpol, eps):
-    Nt = 15000
+    Nt = NT
     MW = 28.05
     denampol = 903.5 * (1 - eps)
     rls = 1e-9

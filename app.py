@@ -74,7 +74,7 @@ if solver_type == options[disabled_index]:
     st.warning("The 'Numerical' solver is currently under development. Please select 'QSSA' for now.")
     st.stop()  # Stop further execution if 'Numerical' is selected
 
-enable_thiele = st.sidebar.checkbox('Use presets', value=False)
+enable_thiele = st.sidebar.checkbox('Use Presets', value=False)
 show_tables = st.sidebar.checkbox('Show Tables', value=False)  # Checkbox to enable/disable tables
 
 D_current = 0.5

@@ -5,9 +5,22 @@ import matplotlib.pyplot as plt
 from calculations import SS_run, FS_run
 from plotting import plot_results
 import math
+import os
+
+# Feature flags (ON/OFF)
+ENABLE_PAGE_HEADER = True
+ENABLE_ABOUT_SECTION = True
+ENABLE_PARAM_SUMMARY = True
+ENABLE_SAVE_PLOTS = True
+ENABLE_SAVE_PLOT_CSV = True
+ENABLE_PLOT_DOWNLOADS = True
 
 # Streamlit layout
-st.set_page_config(layout="wide")
+st.set_page_config(
+    page_title="QSSA Polymer Flow Model",
+    page_icon="⚗️",
+    layout="wide",
+)
 st.sidebar.title("Polymer Flow Model Simulation")
 st.sidebar.markdown("""
 Welcome to the Polymer Flow Model Simulation app! This tool allows you to explore and visualize the effects of various parameters on polymer particle growth.
@@ -18,6 +31,28 @@ st.sidebar.markdown("**App Version:** 1.0.3")
 st.sidebar.markdown("""
 **Warning:** The numerical solver may take a significant amount of time to compute.
 """)
+
+if ENABLE_PAGE_HEADER:
+    st.title("QSSA Polymer Flow Model")
+    st.markdown(
+        "Quasi-steady-state polymer particle growth: set the kinetic and transport inputs in the sidebar, then inspect rate, efficiency, radius, Thiele modulus, yield, and the radial monomer profile."
+    )
+
+if ENABLE_ABOUT_SECTION:
+    with st.expander("About this page", expanded=False):
+        st.markdown(
+            """
+This page runs a **QSSA** (quasi-steady-state approximation) polymer-flow model.
+
+- **Polymerization rate** is the instantaneous yield of polymer per gram of catalyst per hour.
+- **Efficiency** is the effectiveness factor for monomer use inside the growing particle.
+- **Particle radius** grows as polymer accumulates around the catalyst.
+- **Thiele modulus** compares reaction and diffusion; larger values mean stronger intraparticle gradients.
+- **Presets** back-calculate diffusivity from a chosen Thiele modulus.
+
+Python packages live in `requirements.txt`. Optional Linux packages for Streamlit Cloud / Codespaces live in `packages.txt`. Theme settings live in `.streamlit/config.toml`.
+            """
+        )
 
 # Sidebar header
 st.sidebar.header("Simulation Settings")
@@ -102,15 +137,45 @@ else:
         del st.session_state.y_limits
 
 # Extract the concentration data for the selected time
-selected_time = t_values[time_idx]
-selected_Ca = Ca[time_idx][1]
-selected_R = R_data[time_idx]
+time_idx_safe = min(max(int(time_idx), 0), len(t_values) - 1)
+selected_time = t_values[time_idx_safe]
+selected_Ca = Ca[time_idx_safe][1]
+selected_R = R_data[time_idx_safe]
 radial_positions = np.linspace(1e-9 / selected_R, selected_R / selected_R, len(selected_Ca))  # Radial positions from rls to R
 
+if ENABLE_PARAM_SUMMARY:
+    m1, m2, m3, m4 = st.columns(4)
+    m1.metric("Time (s)", f"{selected_time:.4g}")
+    m2.metric("Thiele modulus", f"{thiele_data[time_idx_safe]:.4g}")
+    m3.metric("Efficiency", f"{ef[time_idx_safe]:.4g}")
+    m4.metric("Particle radius (m)", f"{selected_R:.4g}")
+
 # Plot results
-plot_results(
-    t_values, R_pol, ef, R_data, thiele_data, polymer_mass, selected_Ca, radial_positions, AC_Conc, Cas, axis_locked=lock_axes
+fig, png_path, svg_path = plot_results(
+    t_values, R_pol, ef, R_data, thiele_data, polymer_mass, selected_Ca, radial_positions, AC_Conc, Cas, axis_locked=lock_axes,
+    save_plots=ENABLE_SAVE_PLOTS,
+    save_csv=ENABLE_SAVE_PLOT_CSV,
 )
+
+if ENABLE_PLOT_DOWNLOADS and ENABLE_SAVE_PLOTS:
+    if os.path.exists(png_path) and os.path.exists(svg_path):
+        d1, d2 = st.columns(2)
+        with d1:
+            with open(png_path, "rb") as png_file:
+                st.download_button(
+                    label="Download plots PNG",
+                    data=png_file,
+                    file_name="simulation_results.png",
+                    mime="image/png",
+                )
+        with d2:
+            with open(svg_path, "rb") as svg_file:
+                st.download_button(
+                    label="Download plots SVG",
+                    data=svg_file,
+                    file_name="simulation_results.svg",
+                    mime="image/svg+xml",
+                )
 
 # Convert tuples to a DataFrame-friendly format
 # Determine the maximum number of columns needed

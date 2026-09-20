@@ -3,6 +3,51 @@ import math
 
 pi = math.pi
 
+# ON/OFF: use overflow-safe QSSA concentration and efficiency formulas.
+ENABLE_STABLE_QSSA = True
+
+
+def stable_sinh_ratio(r, R, s):
+    """Return sinh(r*s) / sinh(R*s) without overflowing for large Thiele moduli."""
+    r = np.asarray(r, dtype=float)
+    Rs = float(s) * float(R)
+    rs = float(s) * r
+    if abs(Rs) < 1e-12:
+        return np.ones_like(rs, dtype=float) * (r / R if R != 0 else 1.0)
+    if abs(Rs) > 40.0:
+        return np.exp(rs - Rs) * (1.0 - np.exp(-2.0 * rs)) / (1.0 - np.exp(-2.0 * Rs))
+    return np.sinh(rs) / np.sinh(Rs)
+
+
+def qssa_ca(Cas, r, R, b_sqrt):
+    r = max(float(r), 1e-30)
+    R = max(float(R), 1e-30)
+    if ENABLE_STABLE_QSSA:
+        return Cas * (R / r) * float(stable_sinh_ratio(r, R, b_sqrt))
+    return Cas * R / r * np.sinh(r * b_sqrt) / (np.sinh(R * b_sqrt))
+
+
+def x_coth_x_minus_one(x):
+    """Return x*coth(x) - 1 without overflow."""
+    x = float(x)
+    ax = abs(x)
+    if ax < 1e-8:
+        return x * x / 3.0
+    if ax > 40.0:
+        return ax - 1.0
+    return x * np.cosh(x) / np.sinh(x) - 1.0
+
+
+def qssa_R_over_sinh_times_integral(Cas, R, b_sqrt, b):
+    """Cas * R / sinh(R s) * (R s cosh(R s) - sinh(R s)) / b  ==  Cas * R / b * (R s coth(R s) - 1)."""
+    if abs(b) < 1e-30:
+        return 0.0
+    Rs = float(b_sqrt) * float(R)
+    if ENABLE_STABLE_QSSA:
+        return Cas * R / b * x_coth_x_minus_one(Rs)
+    return Cas * R / (np.sinh(Rs)) * (Rs * np.cosh(Rs) - np.sinh(Rs)) / b
+
+
 def A(r, j):
     if j == 0:
         return -1.0  # error
@@ -49,12 +94,13 @@ def beta(t, C0, kp, kd, Dae, alpha, eps):
 def calculate_Vcati(Vcat_init, vtot, r):
     return Vcat_init * (4.0 / 3.0 * pi * r ** 3) / vtot
 
-def SS_run(D, kp, Cas, d, t, C1, kd, dencat, denpol, eps):
+def SS_run(D, kp, Cas, d, t, C1, kd, dencat, denpol, eps, D2=None, kp2=None, Cas2=None, MW2=28.05):
     Nt = 15000
     MW = 28.05
     denampol = 903.5 * (1 - eps)
     rls = 1e-9
     C2 = 0
+    enable_second = (D2 is not None) and (kp2 is not None) and (Cas2 is not None)
 
     Cas = Cas
     iter = 50
@@ -70,6 +116,7 @@ def SS_run(D, kp, Cas, d, t, C1, kd, dencat, denpol, eps):
     ddtc = t / (Nt - 1.0)
     ddt = 0
     Ca = []
+    Ca2_profiles = []
     R_data = []
     ef = []
     thiele_data = []
@@ -82,19 +129,35 @@ def SS_run(D, kp, Cas, d, t, C1, kd, dencat, denpol, eps):
         alpha = R / rcat
         C0 = calculate_C0(C1, C2, kd, t)
         b = beta(t, C0, kp, kd, Dae, alpha, eps)
-        b_sqrt = np.sqrt(b)
+        if (not np.isfinite(b)) or b < 0:
+            b = 0.0
+        b_sqrt = np.sqrt(b) if b > 0 else 0.0
 
         Ca_values = []
         for r in np.linspace(rls, R, iter):
-            Ca_value = Cas * R / r * np.sinh(r * b_sqrt) / (np.sinh(R * b_sqrt))
-            Ca_values.append(Ca_value)
+            Ca_values.append(qssa_ca(Cas, r, R, b_sqrt))
         if len(Ca_values) != iter:
             Ca_values.append(Cas)
 
         if vpol == 0:
             vpol += 1e-9
-        
-        pmass = Vcat_init / vpol * kp * C0 * np.exp(-kd * t) * 28 * ddt * 4 * pi * (Cas * R / (np.sinh(R * b_sqrt)) * (R * b_sqrt * np.cosh(R * b_sqrt) - np.sinh(R * b_sqrt)) / (b))
+
+        flux_term = qssa_R_over_sinh_times_integral(Cas, R, b_sqrt, b)
+        pmass = Vcat_init / vpol * kp * C0 * np.exp(-kd * t) * 28 * ddt * 4 * pi * flux_term
+        if enable_second:
+            b2 = beta(t, C0, kp2, kd, D2, alpha, eps)
+            if (not np.isfinite(b2)) or b2 < 0:
+                b2 = 0.0
+            b2_sqrt = np.sqrt(b2) if b2 > 0 else 0.0
+            Ca2_values = [qssa_ca(Cas2, r, R, b2_sqrt) for r in np.linspace(rls, R, iter)]
+            if len(Ca2_values) != iter:
+                Ca2_values.append(Cas2)
+            flux_term2 = qssa_R_over_sinh_times_integral(Cas2, R, b2_sqrt, b2)
+            pmass2 = Vcat_init / vpol * kp2 * C0 * np.exp(-kd * t) * MW2 * ddt * 4 * pi * flux_term2
+            pmass = pmass + pmass2
+            Ca2_profiles.append((t, Ca2_values))
+        if not np.isfinite(pmass):
+            pmass = 0.0
         acmass += pmass
         Rins_pol = pmass / Vcat_init / dencat / (ddt+0.00000001) * 3600.0 / 1000.0
 
@@ -105,8 +168,12 @@ def SS_run(D, kp, Cas, d, t, C1, kd, dencat, denpol, eps):
         R = (3.0 / 4.0 / pi * vpol) ** (1.0 / 3.0)
 
         Ca.append((t, Ca_values))
-        eff = (R * b_sqrt * np.cosh(R * b_sqrt) - np.sinh(R * b_sqrt)) / (b)
-        eff = 4 * pi * R * eff / (np.sinh(R * b_sqrt)) / vpol
+        if abs(b) < 1e-30 or vpol == 0:
+            eff = 0.0
+        else:
+            eff = 4 * pi * flux_term / vpol
+        if not np.isfinite(eff):
+            eff = 0.0
 
         ddt = ddtc
         R_data.append(R)
@@ -116,11 +183,13 @@ def SS_run(D, kp, Cas, d, t, C1, kd, dencat, denpol, eps):
         thiele_data.append(thiele)
         polymer_mass.append(acmass)
 
+    if enable_second:
+        return t_values, R_pol, ef, R_data, thiele_data, polymer_mass, AC_Conc, Ca, Ca2_profiles
     return t_values, R_pol, ef, R_data, thiele_data, polymer_mass, AC_Conc, Ca
 
 
 
-def FS_run(D, kp, Surf_Conc, d, set_time, Y0 ,kd, dencat, denpol, eps):
+def FS_run_explicit(D, kp, Surf_Conc, d, set_time, Y0 ,kd, dencat, denpol, eps):
     MW = 28.05
     denspol = 903.5  # g/L
     dencat = 2300.0  # g/L
@@ -274,3 +343,184 @@ def FS_run(D, kp, Surf_Conc, d, set_time, Y0 ,kd, dencat, denpol, eps):
             print(f"time : {time} dt: {smallest_dt}")
 
     return (R_data, R_pol, ef, AC_Conc, Conc_Profile, Avg_Conc_Profile, rate_Profile, mass_Profile, save_time)
+
+
+# ON/OFF: implicit radial solver (same output length as QSSA). Set False to call the original explicit FS_run.
+ENABLE_NUMERICAL_IMPLICIT = True
+
+
+def _assemble_implicit_monomer(r, Conc, Y, D, kp, dt, Surf_Conc, nd):
+    n = nd
+    M = np.zeros((n, n))
+    rhs = Conc[:n].copy()
+    B0_ = B0(r[1], r[0])
+    reac0 = kp * Y[0] * 0.5
+    M[0, 0] = 1.0 - dt * D * B0_ + dt * reac0
+    if n > 1:
+        M[0, 1] = dt * D * B0_ + dt * reac0
+    for k in range(1, nd):
+        A_ = A(r, k)
+        B_ = B(r, k)
+        C_ = C(r, k)
+        reac = kp * Y[k] * 0.5
+        M[k, k] = 1.0 - dt * 2.0 * D * B_ + dt * reac
+        M[k, k - 1] = -dt * 2.0 * D * A_
+        coeff_next = -dt * 2.0 * D * C_ + dt * reac
+        if k + 1 < nd:
+            M[k, k + 1] = coeff_next
+        else:
+            rhs[k] -= coeff_next * Surf_Conc
+    return M, rhs
+
+
+def FS_run_implicit(D, kp, Surf_Conc, d, set_time, Y0, kd, dencat, denpol, eps):
+    Nt = 15000
+    MW = 28.05
+    nd = 20
+    v0_cat = 4.0 / 3.0 * pi * (d / 2.0) ** 3
+    denspol = denpol
+    r = [i * (d / 2.0 / nd) for i in range(nd + 1)]
+    Conc = np.zeros(nd + 1)
+    Conc[-1] = Surf_Conc
+    Y = np.full(nd, float(Y0))
+    v = np.zeros(nd)
+    v0 = np.zeros(nd)
+    for k in range(nd):
+        v[k] = 4.0 / 3.0 * pi * (r[k + 1] ** 3 - r[k] ** 3)
+        v0[k] = v[k]
+    vtot = v0_cat
+    acmass = 0.0
+
+    t_values = linspace(0, set_time, Nt)
+    ddt = set_time / (Nt - 1.0) if Nt > 1 else set_time
+
+    R_pol = []
+    R_data = []
+    ef = []
+    thiele_data = []
+    polymer_mass = []
+    AC_Conc = []
+    Ca = []
+
+    for time in t_values:
+        Conc[-1] = Surf_Conc
+        r[0] = 0.0
+        if ddt > 0:
+            M, rhs = _assemble_implicit_monomer(r, Conc, Y, D, kp, ddt, Surf_Conc, nd)
+            try:
+                Conc[:nd] = np.linalg.solve(M, rhs)
+            except np.linalg.LinAlgError:
+                pass
+            Conc = np.where(np.isfinite(Conc), Conc, 0.0)
+            Conc[-1] = Surf_Conc
+
+        Shell_Conc = 0.5 * (Conc[:-1] + Conc[1:])
+        total_mass = 0.0
+        for k in range(nd):
+            mass_i = MW * v[k] * ddt * Y[k] * kp * Shell_Conc[k]
+            if not np.isfinite(mass_i):
+                mass_i = 0.0
+            total_mass += mass_i
+            volume_k = v[k] * ((kp * Shell_Conc[k] * Y[k] * MW * ddt / max(1 - eps, 1e-12) / denspol / 1000) + 1)
+            if np.isfinite(volume_k) and volume_k > 0:
+                v[k] = volume_k
+
+        for k in range(1, nd + 1):
+            rad = (3.0 / 4.0 / pi * v[k - 1] + r[k - 1] ** 3) ** (1.0 / 3.0)
+            r[k] = rad
+
+        for k in range(nd):
+            S = Y0 * np.exp(-kd * time)
+            Y[k] = S * v0[k] / v[k] if v[k] != 0 else S
+
+        pol_R = r[nd]
+        vtot = 4.0 / 3.0 * pi * pol_R ** 3
+        acmass += total_mass
+        ins_rate = total_mass / dencat / v0_cat / (ddt + 1e-30) / 1000.0 * 3600.0
+        Vpol = max(vtot, 1e-30)
+        esum = np.sum(Conc[0:nd] * v)
+        eff = esum / Vpol / Surf_Conc if Surf_Conc else 0.0
+        Y_mean = float(np.mean(Y)) if len(Y) else 0.0
+        thiele = pol_R / 3.0 * np.sqrt(max(kp * Y_mean * max(1 - eps, 0.0) / max(D, 1e-30), 0.0))
+
+        R_data.append(pol_R)
+        R_pol.append(ins_rate)
+        ef.append(eff)
+        AC_Conc.append(Y_mean)
+        thiele_data.append(thiele)
+        polymer_mass.append(acmass)
+        Ca.append((time, Conc.copy()))
+
+    return t_values, R_pol, ef, R_data, thiele_data, polymer_mass, AC_Conc, Ca
+
+
+def FS_run(D, kp, Surf_Conc, d, set_time, Y0, kd, dencat, denpol, eps):
+    if ENABLE_NUMERICAL_IMPLICIT:
+        return FS_run_implicit(D, kp, Surf_Conc, d, set_time, Y0, kd, dencat, denpol, eps)
+    return FS_run_explicit(D, kp, Surf_Conc, d, set_time, Y0, kd, dencat, denpol, eps)
+
+
+# ON/OFF: accumulate a Schulz-Flory MWD from the QSSA histories.
+ENABLE_MWD_CALC = True
+
+
+def compute_mwd(Ca, polymer_mass, kp, kd, ktr, MW=28.05):
+    """Weight MWD from instantaneous Flory distributions mixed by polymer mass produced each step."""
+    n_times = len(polymer_mass)
+    dmass = np.zeros(n_times)
+    dmass[0] = polymer_mass[0]
+    if n_times > 1:
+        dmass[1:] = np.diff(polymer_mass)
+    dmass = np.where(dmass < 0, 0.0, dmass)
+    total = float(np.sum(dmass))
+    if total <= 0:
+        n = np.arange(1, 101)
+        return n, np.zeros_like(n, dtype=float), np.zeros_like(n, dtype=float), 0.0, 0.0, 1.0
+
+    C_avg = np.zeros(n_times)
+    for i, item in enumerate(Ca):
+        vals = item[1] if isinstance(item, tuple) else item
+        C_avg[i] = float(np.mean(vals)) if len(vals) else 0.0
+
+    k_stop = kd + ktr
+    if k_stop <= 0:
+        k_stop = 1e-30
+    DPn = kp * C_avg / k_stop
+    DPn = np.where(np.isfinite(DPn) & (DPn > 1.0), DPn, 1.0)
+    p = 1.0 - 1.0 / DPn
+    p = np.clip(p, 0.0, 0.999999)
+
+    n_max = int(np.ceil(np.max(DPn) * 20.0))
+    if n_max < 50:
+        n_max = 50
+    n_hi = max(n_max, 50)
+    n = np.unique(np.clip(np.round(np.logspace(0, np.log10(n_hi), 20000)).astype(int), 1, None))
+    log_p = np.log(np.clip(p, 1e-15, 1.0 - 1e-15))
+    coeff = dmass * (1.0 - p) ** 2
+    w = np.zeros(len(n))
+    chunk = 256
+    for start in range(0, len(n), chunk):
+        ns = n[start:start + chunk]
+        powers = np.exp(np.outer(log_p, ns - 1.0))
+        w[start:start + chunk] = ns * (coeff @ powers)
+    w_sum = float(np.sum(w))
+    if w_sum <= 0:
+        w_frac = np.zeros_like(w)
+    else:
+        w_frac = w / w_sum
+    Mn_i = MW * DPn
+    Mw_i = MW * DPn * (1.0 + p)
+    chains = np.divide(dmass, Mn_i, out=np.zeros_like(dmass), where=Mn_i > 0)
+    chain_sum = float(np.sum(chains))
+    if chain_sum <= 0:
+        Mn = 0.0
+        Mw = 0.0
+        PDI = 1.0
+    else:
+        Mn = total / chain_sum
+        Mw = float(np.sum(dmass * Mw_i) / total)
+        PDI = Mw / Mn if Mn else 1.0
+    M = n * MW
+    return n, M, w_frac, Mn, Mw, PDI
+
+

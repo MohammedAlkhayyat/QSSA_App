@@ -120,7 +120,7 @@ def SS_run(D, kp, Cas, d, t, C1, kd, dencat, denpol, eps):
 
 
 
-def FS_run(D, kp, Surf_Conc, d, set_time, Y0 ,kd, dencat, denpol, eps):
+def FS_run_explicit(D, kp, Surf_Conc, d, set_time, Y0 ,kd, dencat, denpol, eps):
     MW = 28.05
     denspol = 903.5  # g/L
     dencat = 2300.0  # g/L
@@ -274,3 +274,119 @@ def FS_run(D, kp, Surf_Conc, d, set_time, Y0 ,kd, dencat, denpol, eps):
             print(f"time : {time} dt: {smallest_dt}")
 
     return (R_data, R_pol, ef, AC_Conc, Conc_Profile, Avg_Conc_Profile, rate_Profile, mass_Profile, save_time)
+
+
+# ON/OFF: implicit radial solver (same output length as QSSA). Set False to call the original explicit FS_run.
+ENABLE_NUMERICAL_IMPLICIT = True
+
+
+def _assemble_implicit_monomer(r, Conc, Y, D, kp, dt, Surf_Conc, nd):
+    n = nd
+    M = np.zeros((n, n))
+    rhs = Conc[:n].copy()
+    B0_ = B0(r[1], r[0])
+    reac0 = kp * Y[0] * 0.5
+    M[0, 0] = 1.0 - dt * D * B0_ + dt * reac0
+    if n > 1:
+        M[0, 1] = dt * D * B0_ + dt * reac0
+    for k in range(1, nd):
+        A_ = A(r, k)
+        B_ = B(r, k)
+        C_ = C(r, k)
+        reac = kp * Y[k] * 0.5
+        M[k, k] = 1.0 - dt * 2.0 * D * B_ + dt * reac
+        M[k, k - 1] = -dt * 2.0 * D * A_
+        coeff_next = -dt * 2.0 * D * C_ + dt * reac
+        if k + 1 < nd:
+            M[k, k + 1] = coeff_next
+        else:
+            rhs[k] -= coeff_next * Surf_Conc
+    return M, rhs
+
+
+def FS_run_implicit(D, kp, Surf_Conc, d, set_time, Y0, kd, dencat, denpol, eps):
+    Nt = 15000
+    MW = 28.05
+    nd = 20
+    v0_cat = 4.0 / 3.0 * pi * (d / 2.0) ** 3
+    denspol = denpol
+    r = [i * (d / 2.0 / nd) for i in range(nd + 1)]
+    Conc = np.zeros(nd + 1)
+    Conc[-1] = Surf_Conc
+    Y = np.full(nd, float(Y0))
+    v = np.zeros(nd)
+    v0 = np.zeros(nd)
+    for k in range(nd):
+        v[k] = 4.0 / 3.0 * pi * (r[k + 1] ** 3 - r[k] ** 3)
+        v0[k] = v[k]
+    vtot = v0_cat
+    acmass = 0.0
+
+    t_values = linspace(0, set_time, Nt)
+    ddt = set_time / (Nt - 1.0) if Nt > 1 else set_time
+
+    R_pol = []
+    R_data = []
+    ef = []
+    thiele_data = []
+    polymer_mass = []
+    AC_Conc = []
+    Ca = []
+
+    for time in t_values:
+        Conc[-1] = Surf_Conc
+        r[0] = 0.0
+        if ddt > 0:
+            M, rhs = _assemble_implicit_monomer(r, Conc, Y, D, kp, ddt, Surf_Conc, nd)
+            try:
+                Conc[:nd] = np.linalg.solve(M, rhs)
+            except np.linalg.LinAlgError:
+                pass
+            Conc = np.where(np.isfinite(Conc), Conc, 0.0)
+            Conc[-1] = Surf_Conc
+
+        Shell_Conc = 0.5 * (Conc[:-1] + Conc[1:])
+        total_mass = 0.0
+        for k in range(nd):
+            mass_i = MW * v[k] * ddt * Y[k] * kp * Shell_Conc[k]
+            if not np.isfinite(mass_i):
+                mass_i = 0.0
+            total_mass += mass_i
+            volume_k = v[k] * ((kp * Shell_Conc[k] * Y[k] * MW * ddt / max(1 - eps, 1e-12) / denspol / 1000) + 1)
+            if np.isfinite(volume_k) and volume_k > 0:
+                v[k] = volume_k
+
+        for k in range(1, nd + 1):
+            rad = (3.0 / 4.0 / pi * v[k - 1] + r[k - 1] ** 3) ** (1.0 / 3.0)
+            r[k] = rad
+
+        for k in range(nd):
+            S = Y0 * np.exp(-kd * time)
+            Y[k] = S * v0[k] / v[k] if v[k] != 0 else S
+
+        pol_R = r[nd]
+        vtot = 4.0 / 3.0 * pi * pol_R ** 3
+        acmass += total_mass
+        ins_rate = total_mass / dencat / v0_cat / (ddt + 1e-30) / 1000.0 * 3600.0
+        Vpol = max(vtot, 1e-30)
+        esum = np.sum(Conc[0:nd] * v)
+        eff = esum / Vpol / Surf_Conc if Surf_Conc else 0.0
+        Y_mean = float(np.mean(Y)) if len(Y) else 0.0
+        thiele = pol_R / 3.0 * np.sqrt(max(kp * Y_mean * max(1 - eps, 0.0) / max(D, 1e-30), 0.0))
+
+        R_data.append(pol_R)
+        R_pol.append(ins_rate)
+        ef.append(eff)
+        AC_Conc.append(Y_mean)
+        thiele_data.append(thiele)
+        polymer_mass.append(acmass)
+        Ca.append((time, Conc.copy()))
+
+    return t_values, R_pol, ef, R_data, thiele_data, polymer_mass, AC_Conc, Ca
+
+
+def FS_run(D, kp, Surf_Conc, d, set_time, Y0, kd, dencat, denpol, eps):
+    if ENABLE_NUMERICAL_IMPLICIT:
+        return FS_run_implicit(D, kp, Surf_Conc, d, set_time, Y0, kd, dencat, denpol, eps)
+    return FS_run_explicit(D, kp, Surf_Conc, d, set_time, Y0, kd, dencat, denpol, eps)
+

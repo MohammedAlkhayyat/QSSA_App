@@ -22,8 +22,14 @@ st.sidebar.markdown("""
 # Sidebar header
 st.sidebar.header("Simulation Settings")
 
+# ON/OFF: enable the Numerical solver radio option (Issue #2).
+ENABLE_NUMERICAL = True
+
 # Define solver options and add a note for the disabled feature
-options = ["QSSA", "Numerical (Under Development)"]
+if ENABLE_NUMERICAL:
+    options = ["QSSA", "Numerical"]
+else:
+    options = ["QSSA", "Numerical (Under Development)"]
 disabled_index = 1  # Index of the "under development" option
 
 # Use st.radio to allow only one selection
@@ -31,10 +37,10 @@ solver_type = st.sidebar.radio(
     "Select Solver",
     options,
     index=0,  # Default selection to the first option
-    help="Choose the solver to use for the simulation. Note that 'Numerical' is under development."
+    help="Choose the solver to use for the simulation."
 )
 
-if solver_type == options[disabled_index]:
+if (not ENABLE_NUMERICAL) and solver_type == options[disabled_index]:
     # Handle the "under development" feature
     st.warning("The 'Numerical' solver is currently under development. Please select 'QSSA' for now.")
     st.stop()  # Stop further execution if 'Numerical' is selected
@@ -82,9 +88,14 @@ lock_axes = st.checkbox('Lock Y-Axis', value=False, help="Lock the y-axis limits
 if solver_type == "QSSA":
     t_values, R_pol, ef, R_data, thiele_data, polymer_mass, AC_Conc, Ca = SS_run(
         D * 1e-8, kp, Cas, d * 1e-6, t, C1, kd * 1e-4, dencat, denpol, eps)
-else:  # FS_run
-    R_data, R_pol, ef, AC_Conc, Ca, Avg_Conc_Profile, R_pol, polymer_mass, t_values = FS_run(
+else:  # Numerical FS_run (same return layout as QSSA when ENABLE_NUMERICAL_IMPLICIT is ON)
+    fs_out = FS_run(
         D * 1e-8, kp, Cas, d * 1e-6, t, C1, kd * 1e-4, dencat, denpol, eps)
+    if len(fs_out) == 8:
+        t_values, R_pol, ef, R_data, thiele_data, polymer_mass, AC_Conc, Ca = fs_out
+    else:
+        R_data, R_pol, ef, AC_Conc, Ca, Avg_Conc_Profile, R_pol, polymer_mass, t_values = fs_out
+        thiele_data = [0.0 for _ in t_values]
 
 # Store axis limits in session state if checkbox is checked
 if lock_axes:
@@ -102,8 +113,10 @@ else:
         del st.session_state.y_limits
 
 # Extract the concentration data for the selected time
+time_idx = max(0, min(int(time_idx), len(t_values) - 1))
 selected_time = t_values[time_idx]
-selected_Ca = Ca[time_idx][1]
+ca_entry = Ca[time_idx]
+selected_Ca = ca_entry[1] if isinstance(ca_entry, tuple) else ca_entry
 selected_R = R_data[time_idx]
 radial_positions = np.linspace(1e-9 / selected_R, selected_R / selected_R, len(selected_Ca))  # Radial positions from rls to R
 

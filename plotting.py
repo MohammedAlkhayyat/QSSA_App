@@ -1,7 +1,25 @@
+import os
+import pandas as pd
 import matplotlib.pyplot as plt
 import streamlit as st
 
-def plot_results(t_values, R_pol, ef, R_data, thiele_data, polymer_mass, selected_Ca, radial_positions, AC_Conc, Cas, axis_locked=False):
+def plot_results(
+    t_values,
+    R_pol,
+    ef,
+    R_data,
+    thiele_data,
+    polymer_mass,
+    selected_Ca,
+    radial_positions,
+    AC_Conc,
+    Cas,
+    axis_locked=False,
+    save_plots=False,
+    save_csv=False,
+    plots_dir="plots",
+    csv_dir="plot_data",
+):
     fig, axs = plt.subplots(2, 3, figsize=(15, 10))
 
     # Plot Polymerization Rate
@@ -53,3 +71,35 @@ def plot_results(t_values, R_pol, ef, R_data, thiele_data, polymer_mass, selecte
 
     plt.tight_layout()
     st.pyplot(fig)
+
+    png_path = os.path.join(plots_dir, "simulation_results.png")
+    svg_path = os.path.join(plots_dir, "simulation_results.svg")
+    timeseries_csv_path = os.path.join(csv_dir, "timeseries.csv")
+    concentration_csv_path = os.path.join(csv_dir, "concentration_profile.csv")
+
+    if save_plots:
+        os.makedirs(plots_dir, exist_ok=True)
+        fig.savefig(png_path, format="png", dpi=200, bbox_inches="tight")
+        fig.savefig(svg_path, format="svg", bbox_inches="tight")
+
+    if save_csv:
+        os.makedirs(csv_dir, exist_ok=True)
+        pd.DataFrame(
+            {
+                "Time (s)": t_values,
+                "Polymerization Rate": R_pol,
+                "Efficiency": ef,
+                "Particle Radius (m)": R_data,
+                "Thiele Modulus": thiele_data,
+                "Cumulative polymer mass (grams)": polymer_mass,
+                "Active Sites Conc. (mol/m3)": AC_Conc,
+            }
+        ).to_csv(timeseries_csv_path, index=False)
+        pd.DataFrame(
+            {
+                "Radial Position (m)": radial_positions,
+                "Monomer Concentration (mol/m3)": selected_Ca,
+            }
+        ).to_csv(concentration_csv_path, index=False)
+
+    return fig, png_path, svg_path

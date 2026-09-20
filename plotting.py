@@ -39,7 +39,8 @@ def plot_results(t_values, R_pol, ef, R_data, thiele_data, polymer_mass, selecte
     axs[1, 2].set_xlabel('Radial Position (m)')
     axs[1, 2].set_ylabel('Monomer Concentration (mol/m³)')
     axs[1, 2].set_title('Monomer Concentration')
-    axs[1, 2].set_ylim([0, Cas])
+    cas_hi = Cas if np.isfinite(Cas) and Cas > 0 else 1.0
+    axs[1, 2].set_ylim([0, cas_hi])
 
     # Set axis limits if locked
     if axis_locked and 'y_limits' in st.session_state:

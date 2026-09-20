@@ -6,6 +6,11 @@ from calculations import SS_run, FS_run
 from plotting import plot_results
 import math
 
+# ON/OFF: map the time slider to actual solution samples instead of a raw array index.
+ENABLE_SAFE_TIME_INDEX = True
+# ON/OFF: catch solver/plot failures and show an error instead of a blank page.
+ENABLE_BLANK_SCREEN_GUARD = True
+
 # Streamlit layout
 st.set_page_config(layout="wide")
 st.sidebar.title("Polymer Flow Model Simulation")
@@ -58,7 +63,11 @@ with st.sidebar:
     eps = st.slider('Porosity', min_value=0.0, max_value=1.0, value=0.5, help="Porosity of the polymer.")
     t = st.slider('Simulation Time (s)', min_value=10, max_value=100000, value=15000, help="Total simulation time in seconds.")
     C1 = st.slider('Active Sites Concentration (mol/m³)', min_value=0.1, max_value=10.0, value=5.0, help="Concentration of active sites in the polymer.")
-    time_idx = st.slider('Select Time Index', min_value=0, max_value=t, value=10, help="Index for selecting a specific time point for concentration profile.")
+    if ENABLE_SAFE_TIME_INDEX:
+        time_select_s = st.slider('Select Time (s)', min_value=0, max_value=int(t), value=min(10, int(t)), help="Simulation time at which the monomer concentration profile is shown.")
+        time_idx = time_select_s
+    else:
+        time_idx = st.slider('Select Time Index', min_value=0, max_value=t, value=10, help="Index for selecting a specific time point for concentration profile.")
 
     if enable_thiele:
         if thiele_value == f"ϕ = {0.50:.3f}":
@@ -79,50 +88,109 @@ denpol = 2300
 lock_axes = st.checkbox('Lock Y-Axis', value=False, help="Lock the y-axis limits for all plots to the current range to allow comparison across different simulations.")
 
 # Compute data based on selected solver
-if solver_type == "QSSA":
-    t_values, R_pol, ef, R_data, thiele_data, polymer_mass, AC_Conc, Ca = SS_run(
-        D * 1e-8, kp, Cas, d * 1e-6, t, C1, kd * 1e-4, dencat, denpol, eps)
-else:  # FS_run
+def run_solver():
+    if solver_type == "QSSA":
+        return SS_run(
+            D * 1e-8, kp, Cas, d * 1e-6, t, C1, kd * 1e-4, dencat, denpol, eps)
     R_data, R_pol, ef, AC_Conc, Ca, Avg_Conc_Profile, R_pol, polymer_mass, t_values = FS_run(
         D * 1e-8, kp, Cas, d * 1e-6, t, C1, kd * 1e-4, dencat, denpol, eps)
+    return t_values, R_pol, ef, R_data, None, polymer_mass, AC_Conc, Ca
+
+if ENABLE_BLANK_SCREEN_GUARD:
+    try:
+        t_values, R_pol, ef, R_data, thiele_data, polymer_mass, AC_Conc, Ca = run_solver()
+    except Exception as exc:
+        st.error("The solver could not finish with the current sliders. Try a different combination of Diffusivity, Catalyst Diameter, or Simulation Time.")
+        st.exception(exc)
+        st.stop()
+else:
+    t_values, R_pol, ef, R_data, thiele_data, polymer_mass, AC_Conc, Ca = run_solver()
+
+if thiele_data is None:
+    thiele_data = [0.0 for _ in t_values]
+
+
+def _finite_limits(arr):
+    a = np.asarray(arr, dtype=float).ravel()
+    a = a[np.isfinite(a)]
+    if a.size == 0:
+        return (0.0, 1.0)
+    lo = float(np.min(a))
+    hi = float(np.max(a))
+    if lo == hi:
+        return (lo - 1.0, hi + 1.0)
+    return (lo, hi)
 
 # Store axis limits in session state if checkbox is checked
 if lock_axes:
     if 'y_limits' not in st.session_state:
         st.session_state.y_limits = [
-            (min(R_pol), max(R_pol)),
-            (min(ef), max(ef)),
-            (min(R_data), max(R_data)),
-            (min(thiele_data), max(thiele_data)),
-            (min(polymer_mass), max(polymer_mass)),
-            (min(AC_Conc), max(AC_Conc))
+            _finite_limits(R_pol),
+            _finite_limits(ef),
+            _finite_limits(R_data),
+            _finite_limits(thiele_data),
+            _finite_limits(polymer_mass),
+            _finite_limits(AC_Conc)
         ]
 else:
     if 'y_limits' in st.session_state:
         del st.session_state.y_limits
 
 # Extract the concentration data for the selected time
+n_times = len(t_values)
+if n_times == 0:
+    st.error("The solver returned no time points.")
+    st.stop()
+if ENABLE_SAFE_TIME_INDEX:
+    time_idx = int(np.argmin(np.abs(np.asarray(t_values) - float(time_select_s))))
+time_idx = max(0, min(int(time_idx), n_times - 1))
 selected_time = t_values[time_idx]
-selected_Ca = Ca[time_idx][1]
+ca_entry = Ca[time_idx]
+if isinstance(ca_entry, tuple):
+    selected_Ca = ca_entry[1]
+else:
+    selected_Ca = ca_entry
 selected_R = R_data[time_idx]
+if selected_R == 0 or not np.isfinite(selected_R):
+    selected_R = 1e-9
 radial_positions = np.linspace(1e-9 / selected_R, selected_R / selected_R, len(selected_Ca))  # Radial positions from rls to R
 
 # Plot results
-plot_results(
-    t_values, R_pol, ef, R_data, thiele_data, polymer_mass, selected_Ca, radial_positions, AC_Conc, Cas, axis_locked=lock_axes
-)
+if ENABLE_BLANK_SCREEN_GUARD:
+    try:
+        plot_results(
+            t_values, R_pol, ef, R_data, thiele_data, polymer_mass, selected_Ca, radial_positions, AC_Conc, Cas, axis_locked=lock_axes
+        )
+    except Exception as exc:
+        st.error("Plotting failed for the current results. The simulation data is still available in the tables if enabled.")
+        st.exception(exc)
+else:
+    plot_results(
+        t_values, R_pol, ef, R_data, thiele_data, polymer_mass, selected_Ca, radial_positions, AC_Conc, Cas, axis_locked=lock_axes
+    )
 
 # Convert tuples to a DataFrame-friendly format
-# Determine the maximum number of columns needed
-max_concentration_length = max(len(item[1]) for item in Ca)
+def _conc_row(item):
+    if isinstance(item, tuple) and len(item) > 1:
+        return item[0], list(item[1])
+    return None, list(item)
+
+conc_times = []
+conc_rows = []
+for item in Ca:
+    t_i, vals = _conc_row(item)
+    conc_times.append(t_i if t_i is not None else np.nan)
+    conc_rows.append(vals)
+
+max_concentration_length = max((len(row) for row in conc_rows), default=0)
 
 # Prepare data for DataFrame
 conc_data = {
-    'Time': [item[0] for item in Ca]
+    'Time': conc_times
 }
 # Add each concentration value as a separate column
 for i in range(max_concentration_length):
-    conc_data[f'{i+1}'] = [item[1][i] if i < len(item[1]) else None for item in Ca]
+    conc_data[f'{i+1}'] = [row[i] if i < len(row) else None for row in conc_rows]
 
 # Create DataFrame
 output_conc = pd.DataFrame(conc_data)

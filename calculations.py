@@ -3,6 +3,50 @@ import math
 
 pi = math.pi
 
+# ON/OFF: use overflow-safe QSSA concentration and efficiency formulas.
+ENABLE_STABLE_QSSA = True
+
+
+def stable_sinh_ratio(r, R, s):
+    """Return sinh(r*s) / sinh(R*s) without overflowing for large Thiele moduli."""
+    r = np.asarray(r, dtype=float)
+    Rs = float(s) * float(R)
+    rs = float(s) * r
+    if abs(Rs) < 1e-12:
+        return np.ones_like(rs, dtype=float) * (r / R if R != 0 else 1.0)
+    if abs(Rs) > 40.0:
+        return np.exp(rs - Rs) * (1.0 - np.exp(-2.0 * rs)) / (1.0 - np.exp(-2.0 * Rs))
+    return np.sinh(rs) / np.sinh(Rs)
+
+
+def qssa_ca(Cas, r, R, b_sqrt):
+    r = max(float(r), 1e-30)
+    R = max(float(R), 1e-30)
+    if ENABLE_STABLE_QSSA:
+        return Cas * (R / r) * float(stable_sinh_ratio(r, R, b_sqrt))
+    return Cas * R / r * np.sinh(r * b_sqrt) / (np.sinh(R * b_sqrt))
+
+
+def x_coth_x_minus_one(x):
+    """Return x*coth(x) - 1 without overflow."""
+    x = float(x)
+    ax = abs(x)
+    if ax < 1e-8:
+        return x * x / 3.0
+    if ax > 40.0:
+        return ax - 1.0
+    return x * np.cosh(x) / np.sinh(x) - 1.0
+
+
+def qssa_R_over_sinh_times_integral(Cas, R, b_sqrt, b):
+    """Cas * R / sinh(R s) * (R s cosh(R s) - sinh(R s)) / b  ==  Cas * R / b * (R s coth(R s) - 1)."""
+    if abs(b) < 1e-30:
+        return 0.0
+    Rs = float(b_sqrt) * float(R)
+    if ENABLE_STABLE_QSSA:
+        return Cas * R / b * x_coth_x_minus_one(Rs)
+    return Cas * R / (np.sinh(Rs)) * (Rs * np.cosh(Rs) - np.sinh(Rs)) / b
+
 def A(r, j):
     if j == 0:
         return -1.0  # error
@@ -82,19 +126,24 @@ def SS_run(D, kp, Cas, d, t, C1, kd, dencat, denpol, eps):
         alpha = R / rcat
         C0 = calculate_C0(C1, C2, kd, t)
         b = beta(t, C0, kp, kd, Dae, alpha, eps)
-        b_sqrt = np.sqrt(b)
+        if (not np.isfinite(b)) or b < 0:
+            b = 0.0
+        b_sqrt = np.sqrt(b) if b > 0 else 0.0
 
         Ca_values = []
         for r in np.linspace(rls, R, iter):
-            Ca_value = Cas * R / r * np.sinh(r * b_sqrt) / (np.sinh(R * b_sqrt))
+            Ca_value = qssa_ca(Cas, r, R, b_sqrt)
             Ca_values.append(Ca_value)
         if len(Ca_values) != iter:
             Ca_values.append(Cas)
 
         if vpol == 0:
             vpol += 1e-9
-        
-        pmass = Vcat_init / vpol * kp * C0 * np.exp(-kd * t) * 28 * ddt * 4 * pi * (Cas * R / (np.sinh(R * b_sqrt)) * (R * b_sqrt * np.cosh(R * b_sqrt) - np.sinh(R * b_sqrt)) / (b))
+
+        flux_term = qssa_R_over_sinh_times_integral(Cas, R, b_sqrt, b)
+        pmass = Vcat_init / vpol * kp * C0 * np.exp(-kd * t) * 28 * ddt * 4 * pi * flux_term
+        if not np.isfinite(pmass):
+            pmass = 0.0
         acmass += pmass
         Rins_pol = pmass / Vcat_init / dencat / (ddt+0.00000001) * 3600.0 / 1000.0
 
@@ -105,8 +154,12 @@ def SS_run(D, kp, Cas, d, t, C1, kd, dencat, denpol, eps):
         R = (3.0 / 4.0 / pi * vpol) ** (1.0 / 3.0)
 
         Ca.append((t, Ca_values))
-        eff = (R * b_sqrt * np.cosh(R * b_sqrt) - np.sinh(R * b_sqrt)) / (b)
-        eff = 4 * pi * R * eff / (np.sinh(R * b_sqrt)) / vpol
+        if abs(b) < 1e-30 or vpol == 0:
+            eff = 0.0
+        else:
+            eff = 4 * pi * flux_term / vpol
+        if not np.isfinite(eff):
+            eff = 0.0
 
         ddt = ddtc
         R_data.append(R)

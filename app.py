@@ -2,9 +2,12 @@ import streamlit as st
 import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
-from calculations import SS_run, FS_run
-from plotting import plot_results
+from calculations import SS_run, FS_run, compute_mwd, ENABLE_MWD_CALC
+from plotting import plot_results, plot_mwd
 import math
+
+# ON/OFF: molecular weight distribution from Schulz-Flory mixing.
+ENABLE_MWD = True
 
 # Streamlit layout
 st.set_page_config(layout="wide")
@@ -59,6 +62,9 @@ with st.sidebar:
     t = st.slider('Simulation Time (s)', min_value=10, max_value=100000, value=15000, help="Total simulation time in seconds.")
     C1 = st.slider('Active Sites Concentration (mol/m³)', min_value=0.1, max_value=10.0, value=5.0, help="Concentration of active sites in the polymer.")
     time_idx = st.slider('Select Time Index', min_value=0, max_value=t, value=10, help="Index for selecting a specific time point for concentration profile.")
+    ktr = 0.0
+    if ENABLE_MWD:
+        ktr = st.slider('Chain Transfer Constant (s⁻¹)', min_value=0.0, max_value=50.0, value=1.0, help="Chain transfer / chain-stop rate used for the Schulz-Flory MWD. Set ENABLE_MWD to False to hide this slider.")
 
     if enable_thiele:
         if thiele_value == f"ϕ = {0.50:.3f}":
@@ -111,6 +117,11 @@ radial_positions = np.linspace(1e-9 / selected_R, selected_R / selected_R, len(s
 plot_results(
     t_values, R_pol, ef, R_data, thiele_data, polymer_mass, selected_Ca, radial_positions, AC_Conc, Cas, axis_locked=lock_axes
 )
+
+if ENABLE_MWD and ENABLE_MWD_CALC:
+    n_mwd, M_mwd, w_mwd, Mn, Mw, PDI = compute_mwd(Ca, polymer_mass, kp, kd * 1e-4, ktr, MW=28.05)
+    st.write(f"**MWD:** Mn = {Mn:.4e} g/mol, Mw = {Mw:.4e} g/mol, PDI = {PDI:.3f}")
+    plot_mwd(n_mwd, M_mwd, w_mwd, Mn, Mw, PDI)
 
 # Convert tuples to a DataFrame-friendly format
 # Determine the maximum number of columns needed

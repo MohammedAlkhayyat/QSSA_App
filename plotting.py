@@ -1,5 +1,6 @@
 import matplotlib.pyplot as plt
 import streamlit as st
+import numpy as np
 
 def plot_results(t_values, R_pol, ef, R_data, thiele_data, polymer_mass, selected_Ca, radial_positions, AC_Conc, Cas, axis_locked=False):
     fig, axs = plt.subplots(2, 3, figsize=(15, 10))
@@ -52,4 +53,34 @@ def plot_results(t_values, R_pol, ef, R_data, thiele_data, polymer_mass, selecte
         axs[1, 1].set_ylim(y_limits[4])
 
     plt.tight_layout()
+    st.pyplot(fig)
+
+
+# ON/OFF: write MWD PNG/SVG/CSV next to the on-screen figure.
+ENABLE_SAVE_MWD_FILES = True
+
+
+def plot_mwd(n, M, w_frac, Mn, Mw, PDI):
+    import os
+    import csv
+    fig, axs = plt.subplots(1, 2, figsize=(12, 4))
+    axs[0].plot(n, w_frac)
+    axs[0].set_xlabel('Chain length n')
+    axs[0].set_ylabel('Weight fraction')
+    axs[0].set_title('MWD (chain length)')
+    axs[1].plot(np.log10(np.maximum(M, 1e-30)), w_frac)
+    axs[1].set_xlabel('log10 M (g/mol)')
+    axs[1].set_ylabel('Weight fraction')
+    axs[1].set_title('MWD (log M)')
+    fig.suptitle(f'Mn = {Mn:.4e}   Mw = {Mw:.4e}   PDI = {PDI:.3f}')
+    plt.tight_layout()
+    if ENABLE_SAVE_MWD_FILES:
+        os.makedirs('plot_data', exist_ok=True)
+        fig.savefig('plot_data/mwd.png', dpi=150)
+        fig.savefig('plot_data/mwd.svg')
+        with open('plot_data/mwd.csv', 'w', newline='') as f:
+            writer = csv.writer(f)
+            writer.writerow(['n', 'M_g_per_mol', 'weight_fraction', 'Mn', 'Mw', 'PDI'])
+            for i in range(len(n)):
+                writer.writerow([n[i], M[i], w_frac[i], Mn, Mw, PDI])
     st.pyplot(fig)

@@ -274,3 +274,68 @@ def FS_run(D, kp, Surf_Conc, d, set_time, Y0 ,kd, dencat, denpol, eps):
             print(f"time : {time} dt: {smallest_dt}")
 
     return (R_data, R_pol, ef, AC_Conc, Conc_Profile, Avg_Conc_Profile, rate_Profile, mass_Profile, save_time)
+
+
+# ON/OFF: accumulate a Schulz-Flory MWD from the QSSA histories.
+ENABLE_MWD_CALC = True
+
+
+def compute_mwd(Ca, polymer_mass, kp, kd, ktr, MW=28.05):
+    """Weight MWD from instantaneous Flory distributions mixed by polymer mass produced each step."""
+    n_times = len(polymer_mass)
+    dmass = np.zeros(n_times)
+    dmass[0] = polymer_mass[0]
+    if n_times > 1:
+        dmass[1:] = np.diff(polymer_mass)
+    dmass = np.where(dmass < 0, 0.0, dmass)
+    total = float(np.sum(dmass))
+    if total <= 0:
+        n = np.arange(1, 101)
+        return n, np.zeros_like(n, dtype=float), np.zeros_like(n, dtype=float), 0.0, 0.0, 1.0
+
+    C_avg = np.zeros(n_times)
+    for i, item in enumerate(Ca):
+        vals = item[1] if isinstance(item, tuple) else item
+        C_avg[i] = float(np.mean(vals)) if len(vals) else 0.0
+
+    k_stop = kd + ktr
+    if k_stop <= 0:
+        k_stop = 1e-30
+    DPn = kp * C_avg / k_stop
+    DPn = np.where(np.isfinite(DPn) & (DPn > 1.0), DPn, 1.0)
+    p = 1.0 - 1.0 / DPn
+    p = np.clip(p, 0.0, 0.999999)
+
+    n_max = int(np.ceil(np.max(DPn) * 20.0))
+    if n_max < 50:
+        n_max = 50
+    n_hi = max(n_max, 50)
+    n = np.unique(np.clip(np.round(np.logspace(0, np.log10(n_hi), 20000)).astype(int), 1, None))
+    log_p = np.log(np.clip(p, 1e-15, 1.0 - 1e-15))
+    coeff = dmass * (1.0 - p) ** 2
+    w = np.zeros(len(n))
+    chunk = 256
+    for start in range(0, len(n), chunk):
+        ns = n[start:start + chunk]
+        powers = np.exp(np.outer(log_p, ns - 1.0))
+        w[start:start + chunk] = ns * (coeff @ powers)
+    w_sum = float(np.sum(w))
+    if w_sum <= 0:
+        w_frac = np.zeros_like(w)
+    else:
+        w_frac = w / w_sum
+    Mn_i = MW * DPn
+    Mw_i = MW * DPn * (1.0 + p)
+    chains = np.divide(dmass, Mn_i, out=np.zeros_like(dmass), where=Mn_i > 0)
+    chain_sum = float(np.sum(chains))
+    if chain_sum <= 0:
+        Mn = 0.0
+        Mw = 0.0
+        PDI = 1.0
+    else:
+        Mn = total / chain_sum
+        Mw = float(np.sum(dmass * Mw_i) / total)
+        PDI = Mw / Mn if Mn else 1.0
+    M = n * MW
+    return n, M, w_frac, Mn, Mw, PDI
+

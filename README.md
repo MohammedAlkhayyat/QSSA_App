@@ -55,4 +55,4 @@ docker run -p 8080:8080 qssa-app
 
 ## Requirements
 
-See [`requirements.txt`](requirements.txt) for pinned versions of Streamlit, NumPy, pandas, Matplotlib, and Pillow.
+See [`requirements.txt`](requirements.txt) for pinned versions of Streamlit, NumPy, pandas, Matplotlib, and Pillow (chosen so the page installs on Python 3.9–3.12).
